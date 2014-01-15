@@ -1,0 +1,311 @@
+﻿<?php
+/**
+ *
+ */
+
+/**
+ * Attacker kills the defender. Yeah! This is the return value.
+ */
+define('RPGC_BATTLE_ATT_WINS', 1);
+
+/**
+ * Return value, if none of the characters could win a battle. Bah, lame!
+ */
+define('RPGC_BATTLE_DRAW', 0);
+
+/**
+ * Defender successfully defends himself, making his name count.
+ */
+define('RPGC_BATTLE_DEF_WINS', -1);
+
+/**
+ * Starting health of each character in the battle.
+ * This is meant to be seen as a percentage value.
+ */
+define('RPGC_BATTLE_INIT_HEALTH', 100);
+
+/**
+ * Implements hook_menu().
+ */
+function rpgc_menu() {
+  $items['rpgcdemo'] = array(
+    'title' => 'Battle calculator',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('rpgc_battle_calculator_form'),
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function rpgc_theme() {
+  return array(
+    'rpgc_battle_results' => array(
+      'variables' => array(
+        'attacker' => NULL,
+        'defender' => NULL,
+        'result'   => NULL,
+        'rounds'   => array(),
+      ),
+    ),
+  );
+}
+
+/**
+ * Display a basic battle calculation form. On submit it calculates the results of this battle.
+ */
+function rpgc_battle_calculator_form() {
+  $attacker = $defender = $result = $rounds = NULL;
+
+  if (isset($_SESSION['results'])) {
+    $attacker = $_SESSION['results']['attacker'];
+    $defender = $_SESSION['results']['defender'];
+    $result   = $_SESSION['results']['result'];
+    $rounds   = $_SESSION['results']['rounds'];
+  }
+
+  $form['attacker'] = _rpgc_battle_calculator_character_element($attacker);
+  $form['attacker']['#title'] = t('Attacker');
+
+  $form['defender'] = _rpgc_battle_calculator_character_element($defender);
+  $form['defender']['#title'] = t('Defender');
+
+  $form['results'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Results'),
+    '#description' => t('As soon as you submit this form, your results will be displayed here.'),
+    'results' => array(
+      '#markup' => theme('rpgc_battle_results', array(
+          'attacker' => $attacker,
+          'defender' => $defender,
+          'result'   => $result,
+          'rounds'   => $rounds,
+        )),
+    ),
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Resolve battle'),
+  );
+
+  return $form;
+}
+
+/**
+ *
+ */
+function rpgc_battle_calculator_form_submit($form, &$form_state) {
+  // Get POST values from form.
+  $attacker = (object) $form_state['values']['attacker'];
+  $defender = (object) $form_state['values']['defender'];
+
+  // Now the results will be calculated, with the given characters.
+  $_SESSION['results'] = rpgc_battle_callback($attacker, $defender);
+}
+
+/**
+ *
+ */
+function _rpgc_battle_calculator_character_element($character = NULL) {
+  $element['#type'] = 'fieldset';
+  $element['#tree'] = TRUE;
+  $element['#collapsed'] = TRUE;
+  $element['#collapsible'] = TRUE;
+
+  $element['attack'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Attack'),
+    '#description' => t('The attack value is used to calculate the chance to hit.'),
+    '#default_value' => isset($character->attack) ? check_plain($character->attack) : '',
+    '#required' => TRUE,
+  );
+
+  $element['defense'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Defense'),
+    '#description' => t('The defense value will be used to compare it to the attack value of the oposing character.'),
+    '#default_value' => isset($character->defense) ? check_plain($character->defense) : '',
+    '#required' => TRUE,
+  );
+
+  $element['damage'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Damage'),
+    '#description' => t('The amount of damage this character is able to deal.'),
+    '#default_value' => isset($character->damage) ? check_plain($character->damage) : '',
+    '#required' => TRUE,
+  );
+
+  $element['armor'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Armor'),
+    '#description' => t('The amount of damage this character is able to absorb.'),
+    '#default_value' => isset($character->armor) ? check_plain($character->armor) : '',
+    '#required' => TRUE,
+  );
+
+  return $element;
+}
+
+/**
+ * Function is called when a fight is triggered.
+ *
+ * @param $attacker
+ * @param $defender
+ */
+function rpgc_battle_callback($attacker = NULL, $defender = NULL) {
+  if (empty($attacker) || empty($defender)) {
+    drupal_set_message(t("Oops, someone did something wrong. You'd better not do this again, bro."), 'error');
+    return FALSE;
+  }
+
+  $rounds = array();
+
+  // calculate chance to hit (cth) for attacker and defender, this will be a percent rate
+  $attacker->cth = (($attacker->attack - $defender->defense) / $attacker->attack) * 100;
+  $defender->cth = (($defender->attack - $attacker->defense) / $defender->attack) * 100;
+
+  // no negative values allowed, otherwise this fighting system won't work
+  if ($attacker->cth < 0) $attacker->cth = 0;
+  if ($defender->cth < 0) $defender->cth = 0;
+
+  // if both cth equal zero, the fighters won't be able to hit each other, so let's just return
+  if ($attacker->cth == 0 && $defender->cth == 0) {
+    $result = RPGC_BATTLE_DRAW;
+  }
+  else {
+    // calculate damage attacker and defender will be able to deal to each other
+    $attacker->dmg_rate = (($attacker->damage - $defender->armor) / $attacker->damage) * 100;
+    $defender->dmg_rate = (($defender->damage - $attacker->armor) / $defender->damage) * 100;
+
+    // same as above
+    if ($attacker->dmg_rate < 0) $attacker->dmg_rate = 0;
+    if ($defender->dmg_rate < 0) $defender->dmg_rate = 0;
+
+    // if both fighters can't deal any damage, it might be better to just break here
+    if ($attacker->dmg_rate == 0 && $defender->dmg_rate == 0) {
+      $result = RPGC_BATTLE_DRAW;
+    }
+    else {
+      // to determin when the fight is over, both fighters get a fake health bar
+      $attacker->health = $defender->health = RPGC_BATTLE_INIT_HEALTH;
+
+      // now both fighters are prepared, let's begin the fighting
+      while ($attacker->health > 0 && $defender->health > 0) {
+        $round = array();
+
+        // the attacker started the battle, so he begins
+        $round['attacker_roll'] = rand(0, 100);
+
+        // if the throw is smaller then the chance to hit, he hits the defender
+        if ($round['attacker_roll'] <= $attacker->cth) {
+          $round['attacker_damage'] = rand(0, $attacker->dmg_rate);
+          $defender->health-= $round['attacker_damage'];
+        }
+
+        // if the defender is still alive, it's his turn now
+        if ($attacker->dmg_rate > 0 && $defender->health > 0) {
+          $round['defender_roll'] = rand(0, 100);
+          if ($round['defender_roll'] <= $defender->cth) {
+            $round['defender_damage'] = rand(0, $defender->dmg_rate);
+            $attacker->health-= $round['defender_damage'];
+          }
+        }
+
+        $round['attacker_health'] = $attacker->health;
+        $round['defender_health'] = $defender->health;
+
+        $rounds[] = (object) $round;
+      }
+
+      // check who won this fight
+      if ($attacker->health <= 0) {
+        $result = RPGC_BATTLE_DEF_WINS;
+      }
+      else {
+        $result = RPGC_BATTLE_ATT_WINS;
+      }
+    }
+  }
+
+  // Gather information for return.
+  return array(
+    'attacker' => $attacker,
+    'defender' => $defender,
+    'result'   => $result,
+    'rounds'   => $rounds,
+  );
+}
+
+/**
+ *
+ */
+function theme_rpgc_battle_results($variables) {
+  if (empty($variables['attacker']) || empty($variables['defender']) || $variables['result'] === NULL) {
+    return t('No results available yet.');
+  }
+
+  switch ($variables['result']) {
+  case RPGC_BATTLE_DEF_WINS:
+    $output = '<h3 class="title">' . t('Defender won, after %rounds rounds.', array('%rounds' => count($variables['rounds']))) . '</h3>';
+    break;
+
+  case RPGC_BATTLE_ATT_WINS:
+    $output = '<h3 class="title">' . t('Attacker won, after %rounds rounds.', array('%rounds' => count($variables['rounds']))) . '</h3>';
+    break;
+
+  case RPGC_BATTLE_DRAW:
+    $output = '<h3 class="title">' . t('The battle ended draw.') . '</h3>';
+  }
+
+  $attacker = $defender = array();
+  if (count($variables['rounds'])) {
+    foreach ($variables['rounds'] as $round) {
+      if (isset($round->attacker_roll)) {
+        if (isset($round->attacker_damage)) {
+          $attacker[] = '<li class="rounds attacker">' . t('Attacker(!health) rolled %roll and dealed %dmg damage.', array('!health' => $round->attacker_health, '%roll' => $round->attacker_roll, '%dmg' => $round->attacker_damage)) . '</li>';
+        }
+        else {
+          $attacker[] = '<li class="rounds attacker">' . t('Attacker(!health) rolled %roll and missed.', array('!health' => $round->attacker_health, '%roll' => $round->attacker_roll)) . '</li>';
+        }
+      }
+
+      if (isset($round->defender_roll)) {
+        if (isset($round->defender_damage)) {
+          $defender[] = '<li class="rounds defender">' . t('Defender(!health) rolled %roll and dealed %dmg damage.', array('!health' => $round->defender_health, '%roll' => $round->defender_roll, '%dmg' => $round->defender_damage)) . '</li>';
+        }
+        else {
+          $defender[] = '<li class="rounds defender">' . t('Defender(!health) rolled %roll and missed.', array('!health' => $round->defender_health, '%roll' => $round->defender_roll)) . '</li>';
+        }
+      }
+
+      if ($round->defender_health <= 0) {
+        $defender[] = '<li class="rounds defender"><strong>' . t('Defender died.') . '</strong></li>';
+      }
+      elseif ($round->attacker_health <= 0) {
+        $attacker[] = '<li class="rounds attacker"><strong>' . t('Attacker died.') . '</strong></li>';
+      }
+    }
+
+    $header = array(
+      array('data' => t('Attacker CTH: %cth, DMG: %dmg', array('%cth' => intval($variables['attacker']->cth), '%dmg' => intval($variables['attacker']->dmg_rate)))),
+      array('data' => t('Defender CTH: %cth, DMG: %dmg', array('%cth' => intval($variables['defender']->cth), '%dmg' => intval($variables['defender']->dmg_rate)))),
+    );
+
+    $rows = array(
+      array(
+        array('data' => '<ul class="rounds">' . implode('', $attacker) . '</ul>', 'valign' => 'top'),
+        array('data' => '<ul class="rounds">' . implode('', $defender) . '</ul>', 'valign' => 'top'),
+      ),
+    );
+
+    $output.= theme('table', array('header' => $header, 'rows' => $rows));
+  }
+
+  return $output;
+}

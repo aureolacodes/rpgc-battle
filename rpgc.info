@@ -1,0 +1,5 @@
+﻿; $Id
+name = Drupal RPG Creator
+description = TODO
+package = RPGC
+core = 7.x
