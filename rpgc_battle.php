@@ -30,10 +30,32 @@ class RpgBattle {
 
   /**
    * Validates a battle's opponent.
-   * @todo Actually do a validation.
+   *
+   * @param array $array
+   *   A battle opponent representated by an array
+   *   consisting of four values: attack, defense,
+   *   armor & damage.
+   * @return boolean
    */
-  private static validateOpponent($opponent) {
-    return TRUE;
+  private static validateOpponent($array) {
+    $valid = TRUE;
+    if (!isset($array['attack']) || !is_numeric($array['attack'])) {
+      $valid = FALSE;
+    }
+    else if (!isset($array['defense']) || !is_numeric($array['defense'])) {
+      $valid = FALSE;
+    }
+    else if (!isset($array['armor']) || !is_numeric($array['armor'])) {
+      $valid = FALSE;
+    }
+    else if (!isset($array['damage']) || !is_numeric($array['damage'])) {
+      $valid = FALSE;
+    }
+    else if (isset($array['health']) && !is_numeric($array['health'])) {
+      $valid = FALSE;
+    }
+
+    return $valid;
   }
 
   /**
